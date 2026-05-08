@@ -13,11 +13,18 @@ impl Database {
 
     /// 获取全局代理配置（统一字段）
     ///
-    /// 从 claude 行读取（三行镜像一致）
+    /// 从 claude 行读取（三行镜像一致），密码存储在 settings 表中。
     pub async fn get_global_proxy_config(&self) -> Result<GlobalProxyConfig, AppError> {
-        // 使用 block 限制 conn 的作用域，避免跨 await 持有锁
         let result = {
             let conn = lock_conn!(self.conn);
+            let pwd: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'proxy_password'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
             conn.query_row(
                 "SELECT proxy_enabled, listen_address, listen_port, enable_logging
                  FROM proxy_config WHERE app_type = 'claude'",
@@ -28,11 +35,11 @@ impl Database {
                         listen_address: row.get(1)?,
                         listen_port: row.get::<_, i32>(2)? as u16,
                         enable_logging: row.get::<_, i32>(3)? != 0,
+                        proxy_password: pwd,
                     })
                 },
             )
         };
-        // conn 已在 block 结束时释放
 
         match result {
             Ok(config) => Ok(config),
@@ -44,6 +51,7 @@ impl Database {
                     listen_address: "127.0.0.1".to_string(),
                     listen_port: 15721,
                     enable_logging: true,
+                    proxy_password: None,
                 })
             }
             Err(e) => Err(AppError::Database(e.to_string())),
@@ -51,6 +59,8 @@ impl Database {
     }
 
     /// 更新全局代理配置（镜像写三行）
+    ///
+    /// proxy_config 字段写 proxy_config 表，密码存 settings 表。
     pub async fn update_global_proxy_config(
         &self,
         config: GlobalProxyConfig,
@@ -70,6 +80,13 @@ impl Database {
                 config.listen_port as i32,
                 if config.enable_logging { 1 } else { 0 },
             ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 密码存储在 settings 表中（不修改数据库版本）
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('proxy_password', ?1)",
+            rusqlite::params![config.proxy_password],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -391,6 +408,15 @@ impl Database {
                  FROM proxy_config WHERE app_type = 'claude'",
                 [],
                 |row| {
+                    let pwd: Option<String> = conn
+                        .query_row(
+                            "SELECT value FROM settings WHERE key = 'proxy_password'",
+                            [],
+                            |r| r.get::<_, Option<String>>(0),
+                        )
+                        .ok()
+                        .flatten();
+
                     Ok(ProxyConfig {
                         listen_address: row.get(0)?,
                         listen_port: row.get::<_, i32>(1)? as u16,
@@ -401,6 +427,7 @@ impl Database {
                         streaming_first_byte_timeout: row.get::<_, i32>(4).unwrap_or(60) as u64,
                         streaming_idle_timeout: row.get::<_, i32>(5).unwrap_or(120) as u64,
                         non_streaming_timeout: row.get::<_, i32>(6).unwrap_or(600) as u64,
+                        proxy_password: pwd,
                     })
                 },
             )
@@ -442,6 +469,13 @@ impl Database {
                 config.streaming_idle_timeout as i32,
                 config.non_streaming_timeout as i32,
             ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 密码存储在 settings 表中
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('proxy_password', ?1)",
+            rusqlite::params![config.proxy_password],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
