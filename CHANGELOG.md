@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.2] - 2026-05-08
+
+### Added
+
+- **代理密码认证**: 当代理监听地址设为 `0.0.0.0` 允许局域网设备访问时，可设置密码防止未授权使用。认证支持三种标准 HTTP 头（`Authorization: Bearer`、`x-api-key`、`x-goog-api-key`），与 CLI 工具的现有认证机制兼容。密码通过 `settings` 表持久化，不修改数据库版本号，与旧版 CC Switch 并存。
+  - **接管模式集成**: 密码启用时，接管 Live 配置自动将 CLI 的 auth token 写入实际密码值（而非 `PROXY_MANAGED` 占位符），客户端无需额外配置。
+  - **清密码恢复**: 清除密码后接管配置自动恢复 `PROXY_MANAGED`，代理恢复正常无认证状态。
+  - **健康检查豁免**: `/health` 和 `/status` 端点不受密码认证影响。
+
 ### Fixed
 
 - **OpenAI Responses API usage parsing robustness**: Hardened `build_anthropic_usage_from_responses()` and the Responses → Anthropic SSE translator so a missing or malformed upstream `usage` no longer produces `"usage": null` in `message_delta`. This unblocks strict Anthropic clients (notably the VSCode Claude Code extension) that crashed with "Cannot read properties of null (reading 'output_tokens')" against providers such as Codex OAuth and DashScope's `compatible-mode/v1/responses` endpoint. Added OpenAI field-name fallbacks (`prompt_tokens` / `completion_tokens`), null/empty/partial object handling, and preserved cache token fields even when input/output tokens are missing (#2422).
