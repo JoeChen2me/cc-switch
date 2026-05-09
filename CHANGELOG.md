@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.3] - 2026-05-09
+
+### Fixed
+
+- **切换供应商时 Live 配置密码被覆盖**: 代理接管模式下切换供应商（手动切换或故障转移）时，Live 配置的 `ANTHROPIC_AUTH_TOKEN` 不再被覆盖为 `PROXY_MANAGED`，而是保持当前密码或占位符状态，与接管时的初始写入保持一致。
+
 ## [3.14.2] - 2026-05-08
 
 ### Added
