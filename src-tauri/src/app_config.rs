@@ -163,6 +163,37 @@ impl SkillApps {
     }
 }
 
+/// 已安装的 Claude Code Plugin（直接操作 ~/.claude/plugins/）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledPlugin {
+    /// 唯一标识（= directory_name）
+    pub id: String,
+    /// 显示名称（从 plugin.json 解析）
+    pub name: String,
+    /// 语义化版本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// 描述
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// 作者（序列化为字符串）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// ~/.claude/plugins/ 下的目录名
+    pub directory_name: String,
+    /// 是否启用（启用 = 在 ~/.claude/plugins/，禁用 = 在 ~/.cc-switch/plugins-disabled/）
+    pub enabled: bool,
+    /// 首次发现时间（Unix 时间戳）
+    pub installed_at: i64,
+    /// 文件内容 SHA-256，用于检测外部变更
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// 完整 plugin.json 原始内容
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_json_raw: Option<String>,
+}
+
 /// 已安装的 Skill（v3.10.0+ 统一结构）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

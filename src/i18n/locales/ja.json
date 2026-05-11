@@ -1951,6 +1951,23 @@
       "noSkillsFound": "ZIP ファイルにスキルが見つかりません（SKILL.md が必要です）"
     }
   },
+  "plugins": {
+    "title": "プラグイン",
+    "total": "{{total}} 件のプラグイン",
+    "enabledLabel": "有効",
+    "disabledLabel": "無効",
+    "enabled": "{{name}} を有効にしました",
+    "disabled": "{{name}} を無効にしました",
+    "enable": "有効化",
+    "disable": "無効化",
+    "uninstall": "アンインストール",
+    "uninstallConfirm": "{{name}} をアンインストールしますか？プラグインが完全に削除されます。",
+    "uninstallSuccess": "{{name}} をアンインストールしました",
+    "installZip": "ZIP からインストール",
+    "zipInstallSuccess": "{{count}} 件のプラグインをインストールしました",
+    "viewManifest": "plugin.json を表示",
+    "empty": "プラグインが見つかりません。~/.claude/plugins/ に plugin.json を含むプラグインがここに表示されます。"
+  },
   "deeplink": {
     "confirmImport": "プロバイダーのインポートを確認",
     "confirmImportDescription": "次の設定をディープリンクから CC Switch へインポートします",

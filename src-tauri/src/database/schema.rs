@@ -333,6 +333,24 @@ impl Database {
             Self::migrate_proxy_config_to_per_app(conn)?;
         }
 
+        // 13. Plugins 表（Claude Code plugin 管理）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS plugins (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT,
+                description TEXT,
+                author TEXT,
+                directory_name TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                installed_at INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT,
+                plugin_json_raw TEXT
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
         // 确保 in_failover_queue 列存在（对于已存在的 v2 数据库）
         Self::add_column_if_missing(
             conn,

@@ -43,6 +43,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PluginsPanel } from "@/components/plugins/PluginsPanel";
 
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
@@ -69,6 +70,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   UnifiedSkillsPanelProps
 >(({ onOpenDiscovery, currentApp }, ref) => {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<"skill" | "plugin">("skill");
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -346,6 +348,34 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   return (
     <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
+      {/* Skill / Plugin Tab 切换 */}
+      <div className="flex items-center gap-1 mb-2 border-b border-border-default">
+        <button
+          className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === "skill"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => setActiveTab("skill")}
+        >
+          {t("skills.title")}
+        </button>
+        <button
+          className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            activeTab === "plugin"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => setActiveTab("plugin")}
+        >
+          {t("plugins.title")}
+        </button>
+      </div>
+
+      {activeTab === "plugin" ? (
+        <PluginsPanel />
+      ) : (
+      <>
       <div className="flex items-center justify-between">
         <AppCountBar
           totalLabel={t("skills.installed", { count: skills?.length || 0 })}
@@ -471,6 +501,8 @@ const UnifiedSkillsPanel = React.forwardRef<
         onClose={() => setRestoreDialogOpen(false)}
         open={restoreDialogOpen}
       />
+      </>
+      )}
     </div>
   );
 });

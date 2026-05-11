@@ -1191,6 +1191,12 @@ pub fn run() {
             commands::add_skill_repo,
             commands::remove_skill_repo,
             commands::install_skills_from_zip,
+            // Plugin management (Claude Code plugins)
+            commands::scan_plugins,
+            commands::enable_plugin,
+            commands::disable_plugin,
+            commands::uninstall_plugin,
+            commands::install_plugin_from_zip,
             // Auto launch
             commands::set_auto_launch,
             commands::get_auto_launch_status,

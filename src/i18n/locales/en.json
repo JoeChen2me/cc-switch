@@ -1951,6 +1951,23 @@
       "noSkillsFound": "No skills found in ZIP file (requires SKILL.md file)"
     }
   },
+  "plugins": {
+    "title": "Plugins",
+    "total": "{{total}} plugins",
+    "enabledLabel": "enabled",
+    "disabledLabel": "disabled",
+    "enabled": "{{name}} enabled",
+    "disabled": "{{name}} disabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "uninstall": "Uninstall",
+    "uninstallConfirm": "Are you sure you want to uninstall {{name}}? This will permanently delete the plugin.",
+    "uninstallSuccess": "{{name}} uninstalled",
+    "installZip": "Install from ZIP",
+    "zipInstallSuccess": "Installed {{count}} plugin(s)",
+    "viewManifest": "View plugin.json",
+    "empty": "No plugins found. Plugins with plugin.json in ~/.claude/plugins/ will appear here."
+  },
   "deeplink": {
     "confirmImport": "Confirm Import Provider",
     "confirmImportDescription": "The following configuration will be imported from deep link into CC Switch",
