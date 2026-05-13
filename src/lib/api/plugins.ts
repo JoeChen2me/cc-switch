@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
-/** 已安装的 Claude Code Plugin */
+/** 已安装的 Plugin（Claude Code 或 Codex） */
 export interface InstalledPlugin {
   id: string;
+  appType: "claude" | "codex";
   name: string;
   version?: string;
   description?: string;
@@ -14,29 +15,34 @@ export interface InstalledPlugin {
   pluginJsonRaw?: string;
 }
 
+export type AppType = "claude" | "codex";
+
 export const pluginsApi = {
-  /** 扫描所有已安装的 Plugin（同步文件系统与数据库） */
-  async scan(): Promise<InstalledPlugin[]> {
-    return await invoke("scan_plugins");
+  /** 扫描指定应用的所有已安装 Plugin */
+  async scan(appType: AppType): Promise<InstalledPlugin[]> {
+    return await invoke("scan_plugins", { appType });
   },
 
-  /** 启用 Plugin（从 disabled 目录移回 plugins 目录） */
-  async enable(id: string): Promise<InstalledPlugin> {
-    return await invoke("enable_plugin", { id });
+  /** 启用 Plugin */
+  async enable(id: string, appType: AppType): Promise<InstalledPlugin> {
+    return await invoke("enable_plugin", { id, appType });
   },
 
-  /** 禁用 Plugin（从 plugins 目录移到 disabled 目录） */
-  async disable(id: string): Promise<InstalledPlugin> {
-    return await invoke("disable_plugin", { id });
+  /** 禁用 Plugin */
+  async disable(id: string, appType: AppType): Promise<InstalledPlugin> {
+    return await invoke("disable_plugin", { id, appType });
   },
 
-  /** 卸载 Plugin（彻底删除） */
-  async uninstall(id: string): Promise<boolean> {
-    return await invoke("uninstall_plugin", { id });
+  /** 卸载 Plugin */
+  async uninstall(id: string, appType: AppType): Promise<boolean> {
+    return await invoke("uninstall_plugin", { id, appType });
   },
 
   /** 从 ZIP 文件安装 Plugin */
-  async installFromZip(filePath: string): Promise<InstalledPlugin[]> {
-    return await invoke("install_plugin_from_zip", { filePath });
+  async installFromZip(
+    filePath: string,
+    appType: AppType,
+  ): Promise<InstalledPlugin[]> {
+    return await invoke("install_plugin_from_zip", { filePath, appType });
   },
 };

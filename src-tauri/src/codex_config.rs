@@ -34,6 +34,11 @@ pub fn get_codex_config_dir() -> PathBuf {
     get_home_dir().join(".codex")
 }
 
+/// 获取 Codex plugins 目录路径
+pub fn get_codex_plugins_dir() -> PathBuf {
+    get_codex_config_dir().join("plugins")
+}
+
 /// 获取 Codex auth.json 路径
 pub fn get_codex_auth_path() -> PathBuf {
     get_codex_config_dir().join("auth.json")

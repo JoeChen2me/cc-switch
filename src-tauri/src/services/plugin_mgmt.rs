@@ -1,10 +1,11 @@
-//! Claude Code Plugin 管理服务
+//! Plugin 管理服务
 //!
-//! 直接操作 ~/.claude/plugins/ 目录，数据库仅缓存元数据。
-//! 禁用时将 plugin 移到 ~/.cc-switch/plugins-disabled/。
+//! 分别管理 Claude Code (~/.claude/plugins/) 和 Codex (~/.codex/plugins/) 的插件。
+//! 禁用时将 plugin 移到 ~/.cc-switch/plugins-disabled/{app_type}/。
 
-use crate::app_config::InstalledPlugin;
-use crate::config::get_app_config_dir;
+use crate::app_config::{AppType, InstalledPlugin};
+use crate::codex_config::get_codex_plugins_dir;
+use crate::config::{get_app_config_dir, get_claude_config_dir};
 use crate::database::Database;
 use crate::error::AppError;
 use serde::Deserialize;
@@ -38,12 +39,7 @@ pub struct PluginService {
 
 /// 验证 id 不含路径穿越字符
 fn validate_id(id: &str) -> Result<(), AppError> {
-    if id.is_empty()
-        || id.contains('/')
-        || id.contains('\\')
-        || id.contains("..")
-        || id == "."
-    {
+    if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") || id == "." {
         return Err(AppError::Message(format!("非法插件标识: {id}")));
     }
     Ok(())
@@ -54,10 +50,8 @@ fn move_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(), AppError
     if std::fs::rename(src, dst).is_ok() {
         return Ok(());
     }
-    // rename 失败（可能跨文件系统），回退到 copy + remove
     copy_dir_recursive(src, dst)?;
-    std::fs::remove_dir_all(src)
-        .map_err(|e| AppError::Message(format!("删除源目录失败: {e}")))?;
+    std::fs::remove_dir_all(src).map_err(|e| AppError::Message(format!("删除源目录失败: {e}")))?;
     Ok(())
 }
 
@@ -66,44 +60,65 @@ impl PluginService {
         Self { db }
     }
 
-    /// ~/.claude/plugins/ 路径
-    fn plugins_dir() -> Result<PathBuf, AppError> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| AppError::Message("无法获取 HOME 目录".into()))?;
-        Ok(home.join(".claude").join("plugins"))
+    /// 获取指定应用的插件启用目录
+    fn plugins_dir(app_type: &AppType) -> Result<PathBuf, AppError> {
+        match app_type {
+            AppType::Claude => Ok(get_claude_config_dir().join("plugins")),
+            AppType::Codex => Ok(get_codex_plugins_dir()),
+            other => Err(AppError::Message(format!(
+                "不支持的应用类型: {}",
+                other.as_str()
+            ))),
+        }
     }
 
-    /// ~/.cc-switch/plugins-disabled/ 路径
-    fn disabled_dir() -> Result<PathBuf, AppError> {
-        Ok(get_app_config_dir().join("plugins-disabled"))
+    /// 获取指定应用的插件禁用目录
+    /// Claude: ~/.cc-switch/plugins-disabled/claude/
+    /// Codex:  ~/.cc-switch/plugins-disabled/codex/
+    fn disabled_dir(app_type: &AppType) -> Result<PathBuf, AppError> {
+        Ok(get_app_config_dir()
+            .join("plugins-disabled")
+            .join(app_type.as_str()))
     }
 
-    /// 扫描所有已安装的 plugin，同步数据库并返回列表
-    pub fn scan_plugins(&self) -> Result<Vec<InstalledPlugin>, AppError> {
-        let plugins_dir = Self::plugins_dir()?;
-        let disabled_dir = Self::disabled_dir()?;
+    /// 获取指定应用的 manifest 路径列表（按优先级排列）
+    /// Claude: .claude-plugin/plugin.json 优先, plugin.json 回退
+    /// Codex:  .codex-plugin/plugin.json
+    fn manifest_paths(plugin_dir: &std::path::Path, app_type: &AppType) -> Vec<PathBuf> {
+        match app_type {
+            AppType::Claude => vec![
+                plugin_dir.join(".claude-plugin").join("plugin.json"),
+                plugin_dir.join("plugin.json"),
+            ],
+            AppType::Codex => vec![plugin_dir.join(".codex-plugin").join("plugin.json")],
+            _ => vec![],
+        }
+    }
+
+    /// 扫描指定应用的所有已安装 plugin，同步数据库并返回列表
+    pub fn scan_plugins(&self, app_type: &AppType) -> Result<Vec<InstalledPlugin>, AppError> {
+        let plugins_dir = Self::plugins_dir(app_type)?;
+        let disabled_dir = Self::disabled_dir(app_type)?;
 
         std::fs::create_dir_all(&disabled_dir)
             .map_err(|e| AppError::Message(format!("创建 plugins-disabled 目录失败: {e}")))?;
 
         let mut result = Vec::new();
 
-        // 获取数据库已有记录，用于保留 installed_at
-        let existing = self.db.get_all_plugins()?;
+        let existing = self.db.get_plugins_by_app(app_type.as_str())?;
         let existing_map: std::collections::HashMap<String, i64> = existing
             .iter()
             .map(|p| (p.id.clone(), p.installed_at))
             .collect();
 
         if plugins_dir.exists() {
-            Self::scan_directory(&plugins_dir, true, &existing_map, &mut result)?;
+            Self::scan_directory(&plugins_dir, true, app_type, &existing_map, &mut result)?;
         }
         if disabled_dir.exists() {
-            Self::scan_directory(&disabled_dir, false, &existing_map, &mut result)?;
+            Self::scan_directory(&disabled_dir, false, app_type, &existing_map, &mut result)?;
         }
 
-        // 事务性同步数据库
-        self.db.sync_plugins_batch(&result)?;
+        self.db.sync_plugins_batch(app_type.as_str(), &result)?;
 
         Ok(result)
     }
@@ -111,6 +126,7 @@ impl PluginService {
     fn scan_directory(
         dir: &std::path::Path,
         enabled: bool,
+        app_type: &AppType,
         existing: &std::collections::HashMap<String, i64>,
         result: &mut Vec<InstalledPlugin>,
     ) -> Result<(), AppError> {
@@ -123,16 +139,11 @@ impl PluginService {
                 continue;
             }
 
-            let manifest_path = path.join(".claude-plugin").join("plugin.json");
-            let manifest_path = if manifest_path.exists() {
-                manifest_path
-            } else {
-                let fallback = path.join("plugin.json");
-                if fallback.exists() {
-                    fallback
-                } else {
-                    continue;
-                }
+            let candidates = Self::manifest_paths(&path, app_type);
+            let manifest_path = candidates.iter().find(|p| p.exists());
+
+            let Some(manifest_path) = manifest_path else {
+                continue;
             };
 
             let directory_name = path
@@ -141,7 +152,7 @@ impl PluginService {
                 .to_string_lossy()
                 .to_string();
 
-            match Self::parse_plugin(&directory_name, &manifest_path, enabled, existing) {
+            match Self::parse_plugin(&directory_name, manifest_path, enabled, app_type, existing) {
                 Ok(plugin) => result.push(plugin),
                 Err(e) => {
                     log::warn!("解析插件 {} 的 plugin.json 失败: {e}", directory_name);
@@ -155,6 +166,7 @@ impl PluginService {
         directory_name: &str,
         manifest_path: &std::path::Path,
         enabled: bool,
+        app_type: &AppType,
         existing: &std::collections::HashMap<String, i64>,
     ) -> Result<InstalledPlugin, AppError> {
         let raw = std::fs::read_to_string(manifest_path)
@@ -179,11 +191,11 @@ impl PluginService {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // 保留数据库中已有的 installed_at，避免每次扫描覆盖首次安装时间
         let installed_at = existing.get(directory_name).copied().unwrap_or(now);
 
         Ok(InstalledPlugin {
             id: directory_name.to_string(),
+            app_type: app_type.clone(),
             name: manifest.name,
             version: manifest.version,
             description: manifest.description,
@@ -196,16 +208,20 @@ impl PluginService {
         })
     }
 
-    pub fn disable_plugin(&self, id: &str) -> Result<InstalledPlugin, AppError> {
+    pub fn disable_plugin(
+        &self,
+        id: &str,
+        app_type: &AppType,
+    ) -> Result<InstalledPlugin, AppError> {
         validate_id(id)?;
-        let src = Self::plugins_dir()?.join(id);
-        let dst = Self::disabled_dir()?.join(id);
+        let src = Self::plugins_dir(app_type)?.join(id);
+        let dst = Self::disabled_dir(app_type)?.join(id);
 
         if !src.exists() {
             return Err(AppError::Message(format!("插件 {id} 不存在于启用目录")));
         }
 
-        std::fs::create_dir_all(Self::disabled_dir()?)
+        std::fs::create_dir_all(Self::disabled_dir(app_type)?)
             .map_err(|e| AppError::Message(format!("创建禁用目录失败: {e}")))?;
 
         if dst.exists() {
@@ -216,24 +232,25 @@ impl PluginService {
         move_dir(&src, &dst)
             .map_err(|e| AppError::Message(format!("移动插件到禁用目录失败: {e}")))?;
 
-        self.db.update_plugin_enabled(id, false)?;
+        self.db
+            .update_plugin_enabled(id, app_type.as_str(), false)?;
 
-        self.scan_plugins()?
+        self.scan_plugins(app_type)?
             .into_iter()
             .find(|p| p.id == id)
             .ok_or_else(|| AppError::Message(format!("禁用后未找到插件 {id}")))
     }
 
-    pub fn enable_plugin(&self, id: &str) -> Result<InstalledPlugin, AppError> {
+    pub fn enable_plugin(&self, id: &str, app_type: &AppType) -> Result<InstalledPlugin, AppError> {
         validate_id(id)?;
-        let src = Self::disabled_dir()?.join(id);
-        let dst = Self::plugins_dir()?.join(id);
+        let src = Self::disabled_dir(app_type)?.join(id);
+        let dst = Self::plugins_dir(app_type)?.join(id);
 
         if !src.exists() {
             return Err(AppError::Message(format!("插件 {id} 不存在于禁用目录")));
         }
 
-        std::fs::create_dir_all(Self::plugins_dir()?)
+        std::fs::create_dir_all(Self::plugins_dir(app_type)?)
             .map_err(|e| AppError::Message(format!("创建插件目录失败: {e}")))?;
 
         if dst.exists() {
@@ -244,18 +261,18 @@ impl PluginService {
         move_dir(&src, &dst)
             .map_err(|e| AppError::Message(format!("移动插件到启用目录失败: {e}")))?;
 
-        self.db.update_plugin_enabled(id, true)?;
+        self.db.update_plugin_enabled(id, app_type.as_str(), true)?;
 
-        self.scan_plugins()?
+        self.scan_plugins(app_type)?
             .into_iter()
             .find(|p| p.id == id)
             .ok_or_else(|| AppError::Message(format!("启用后未找到插件 {id}")))
     }
 
-    pub fn uninstall_plugin(&self, id: &str) -> Result<bool, AppError> {
+    pub fn uninstall_plugin(&self, id: &str, app_type: &AppType) -> Result<bool, AppError> {
         validate_id(id)?;
-        let enabled_path = Self::plugins_dir()?.join(id);
-        let disabled_path = Self::disabled_dir()?.join(id);
+        let enabled_path = Self::plugins_dir(app_type)?.join(id);
+        let disabled_path = Self::disabled_dir(app_type)?.join(id);
 
         let mut deleted = false;
         if enabled_path.exists() {
@@ -273,16 +290,20 @@ impl PluginService {
             return Err(AppError::Message(format!("插件 {id} 不存在")));
         }
 
-        self.db.delete_plugin(id)?;
+        self.db.delete_plugin(id, app_type.as_str())?;
         Ok(true)
     }
 
-    pub fn install_from_zip(&self, zip_path: &str) -> Result<Vec<InstalledPlugin>, AppError> {
-        let plugins_dir = Self::plugins_dir()?;
+    pub fn install_from_zip(
+        &self,
+        zip_path: &str,
+        app_type: &AppType,
+    ) -> Result<Vec<InstalledPlugin>, AppError> {
+        let plugins_dir = Self::plugins_dir(app_type)?;
         std::fs::create_dir_all(&plugins_dir)
             .map_err(|e| AppError::Message(format!("创建插件目录失败: {e}")))?;
 
-        let existing = self.db.get_all_plugins()?;
+        let existing = self.db.get_plugins_by_app(app_type.as_str())?;
         let existing_map: std::collections::HashMap<String, i64> = existing
             .iter()
             .map(|p| (p.id.clone(), p.installed_at))
@@ -294,15 +315,15 @@ impl PluginService {
         let mut archive = zip::ZipArchive::new(file)
             .map_err(|e| AppError::Message(format!("解析 ZIP 文件失败: {e}")))?;
 
-        let temp_dir = tempfile::tempdir()
-            .map_err(|e| AppError::Message(format!("创建临时目录失败: {e}")))?;
+        let temp_dir =
+            tempfile::tempdir().map_err(|e| AppError::Message(format!("创建临时目录失败: {e}")))?;
 
         archive
             .extract(temp_dir.path())
             .map_err(|e| AppError::Message(format!("解压 ZIP 失败: {e}")))?;
 
         let mut installed = Vec::new();
-        Self::find_plugin_dirs(temp_dir.path(), &mut installed)?;
+        Self::find_plugin_dirs(temp_dir.path(), app_type, &mut installed)?;
 
         if installed.is_empty() {
             return Err(AppError::Message(
@@ -318,7 +339,6 @@ impl PluginService {
                 .to_string_lossy()
                 .to_string();
 
-            // 防止 ZIP 路径穿越
             if dir_name.contains('/') || dir_name.contains('\\') || dir_name.contains("..") {
                 log::warn!("跳过非法目录名: {dir_name}");
                 continue;
@@ -333,15 +353,9 @@ impl PluginService {
 
             copy_dir_recursive(&plugin_src, &dest)?;
 
-            let manifest_path = dest
-                .join(".claude-plugin")
-                .join("plugin.json")
-                .exists()
-                .then(|| dest.join(".claude-plugin").join("plugin.json"))
-                .or_else(|| dest.join("plugin.json").exists().then(|| dest.join("plugin.json")));
-
-            if let Some(mp) = manifest_path {
-                match Self::parse_plugin(&dir_name, &mp, true, &existing_map) {
+            let candidates = Self::manifest_paths(&dest, app_type);
+            if let Some(mp) = candidates.iter().find(|p| p.exists()) {
+                match Self::parse_plugin(&dir_name, mp, true, app_type, &existing_map) {
                     Ok(plugin) => {
                         self.db.save_plugin(&plugin)?;
                         results.push(plugin);
@@ -358,23 +372,25 @@ impl PluginService {
 
     fn find_plugin_dirs(
         dir: &std::path::Path,
+        app_type: &AppType,
         results: &mut Vec<PathBuf>,
     ) -> Result<(), AppError> {
-        let has_manifest = dir.join(".claude-plugin").join("plugin.json").exists()
-            || dir.join("plugin.json").exists();
+        let has_manifest = Self::manifest_paths(dir, app_type)
+            .iter()
+            .any(|p| p.exists());
 
         if has_manifest {
             results.push(dir.to_path_buf());
             return Ok(());
         }
 
-        let entries = std::fs::read_dir(dir)
-            .map_err(|e| AppError::Message(format!("读取目录失败: {e}")))?;
+        let entries =
+            std::fs::read_dir(dir).map_err(|e| AppError::Message(format!("读取目录失败: {e}")))?;
 
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                Self::find_plugin_dirs(&path, results)?;
+                Self::find_plugin_dirs(&path, app_type, results)?;
             }
         }
         Ok(())
@@ -382,18 +398,19 @@ impl PluginService {
 }
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), AppError> {
-    std::fs::create_dir_all(dst)
-        .map_err(|e| AppError::Message(format!("创建目录失败: {e}")))?;
+    std::fs::create_dir_all(dst).map_err(|e| AppError::Message(format!("创建目录失败: {e}")))?;
 
-    let entries = std::fs::read_dir(src)
-        .map_err(|e| AppError::Message(format!("读取源目录失败: {e}")))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| AppError::Message(format!("读取源目录失败: {e}")))?;
 
     for entry in entries.flatten() {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
-        // 跳过符号链接，防止跟随到插件目录外的路径
-        if src_path.symlink_metadata().map_or(false, |m| m.file_type().is_symlink()) {
+        if src_path
+            .symlink_metadata()
+            .map_or(false, |m| m.file_type().is_symlink())
+        {
             log::warn!("跳过符号链接: {}", src_path.display());
             continue;
         }

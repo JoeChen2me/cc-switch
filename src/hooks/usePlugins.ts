@@ -1,80 +1,82 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  keepPreviousData,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   pluginsApi,
   type InstalledPlugin,
+  type AppType,
 } from "@/lib/api/plugins";
 
-export function useInstalledPlugins() {
+export function useInstalledPlugins(appType: AppType) {
   return useQuery({
-    queryKey: ["plugins", "installed"],
-    queryFn: () => pluginsApi.scan(),
+    queryKey: ["plugins", "installed", appType],
+    queryFn: () => pluginsApi.scan(appType),
     staleTime: Infinity,
-    placeholderData: keepPreviousData,
   });
 }
 
-export function useEnablePlugin() {
+export function useEnablePlugin(appType: AppType) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => pluginsApi.enable(id),
+    mutationFn: (id: string) => pluginsApi.enable(id, appType),
     onSuccess: (updated) => {
       queryClient.setQueryData<InstalledPlugin[]>(
-        ["plugins", "installed"],
+        ["plugins", "installed", appType],
         (old) =>
           old?.map((p) => (p.id === updated.id ? updated : p)) ?? [updated],
       );
     },
     onError: () => {
-      queryClient.invalidateQueries({ queryKey: ["plugins", "installed"] });
+      queryClient.invalidateQueries({
+        queryKey: ["plugins", "installed", appType],
+      });
     },
   });
 }
 
-export function useDisablePlugin() {
+export function useDisablePlugin(appType: AppType) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => pluginsApi.disable(id),
+    mutationFn: (id: string) => pluginsApi.disable(id, appType),
     onSuccess: (updated) => {
       queryClient.setQueryData<InstalledPlugin[]>(
-        ["plugins", "installed"],
+        ["plugins", "installed", appType],
         (old) =>
           old?.map((p) => (p.id === updated.id ? updated : p)) ?? [updated],
       );
     },
     onError: () => {
-      queryClient.invalidateQueries({ queryKey: ["plugins", "installed"] });
+      queryClient.invalidateQueries({
+        queryKey: ["plugins", "installed", appType],
+      });
     },
   });
 }
 
-export function useUninstallPlugin() {
+export function useUninstallPlugin(appType: AppType) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => pluginsApi.uninstall(id),
+    mutationFn: (id: string) => pluginsApi.uninstall(id, appType),
     onSuccess: (_, id) => {
       queryClient.setQueryData<InstalledPlugin[]>(
-        ["plugins", "installed"],
+        ["plugins", "installed", appType],
         (old) => old?.filter((p) => p.id !== id),
       );
     },
     onError: () => {
-      queryClient.invalidateQueries({ queryKey: ["plugins", "installed"] });
+      queryClient.invalidateQueries({
+        queryKey: ["plugins", "installed", appType],
+      });
     },
   });
 }
 
-export function useInstallPluginFromZip() {
+export function useInstallPluginFromZip(appType: AppType) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (filePath: string) => pluginsApi.installFromZip(filePath),
+    mutationFn: (filePath: string) =>
+      pluginsApi.installFromZip(filePath, appType),
     onSuccess: (installed) => {
       queryClient.setQueryData<InstalledPlugin[]>(
-        ["plugins", "installed"],
+        ["plugins", "installed", appType],
         (old) => {
           if (!old) return installed;
           const existingIds = new Set(old.map((p) => p.id));
@@ -87,9 +89,11 @@ export function useInstallPluginFromZip() {
       );
     },
     onError: () => {
-      queryClient.invalidateQueries({ queryKey: ["plugins", "installed"] });
+      queryClient.invalidateQueries({
+        queryKey: ["plugins", "installed", appType],
+      });
     },
   });
 }
 
-export type { InstalledPlugin };
+export type { InstalledPlugin, AppType };
